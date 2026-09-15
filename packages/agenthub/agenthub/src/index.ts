@@ -21,13 +21,14 @@ import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands
 import { RegistryService, SCHEMA_VERSION, type Project } from './registry.ts'
 import { SkillsService, type Skill } from './skills.ts'
 import { DoctorService, type DoctorReport } from './doctor.ts'
+import { registerWebRoutes } from './web.ts'
 
 export const name = 'agenthub'
 
-export const version = '0.4.0'
+export const version = '0.5.0'
 
-/** We depend on `commands`; we provide `agenthub.registry` and `agenthub.skills`. */
-export const inject = ['commands'] as const
+/** We depend on `commands` and `webServer`; we provide the three services. */
+export const inject = ['commands', 'webServer'] as const
 
 /** Pulled in by other agenthub-* plugins once we land them. */
 declare module '@deepseek-ai/cordis' {
@@ -279,4 +280,7 @@ export function apply(ctx: Context): void {
       },
     })
   }, 'agenthub command lifecycle')
+
+  // v0.5.0: mount REST endpoints on the dsh web server.
+  registerWebRoutes(ctx, registry, skills, doctor)
 }
