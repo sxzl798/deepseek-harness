@@ -1,8 +1,8 @@
 // Quick smoke test for ProfilesService + BundlesService.
 
-import { ProfilesService } from '../packages/agenthub/agenthub/src/profiles.ts'
-import { BundlesService } from '../packages/agenthub/agenthub/src/bundles.ts'
-import { RegistryService } from '../packages/agenthub/agenthub/src/registry.ts'
+import { ProfilesService } from '../contrib/agenthub/src/profiles.ts'
+import { BundlesService } from '../contrib/agenthub/src/bundles.ts'
+import { RegistryService } from '../contrib/agenthub/src/registry.ts'
 
 class MockCtx {
   reflect = { provide: () => undefined }

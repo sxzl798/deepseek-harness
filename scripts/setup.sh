@@ -4,7 +4,7 @@
 # What it does:
 #   1. Ensures ~/AgentHub exists
 #   2. Clones sxzl798/agent-harness to ~/Developer/agent-harness (if absent)
-#   3. Runs pnpm install + build (handles lefthook/Codex hooksPath clash)
+#   3. Runs pnpm install (handles lefthook/Codex hooksPath clash)
 #   4. Writes a dsh profile overlay so the plugin auto-loads on every
 #      `pnpm dsh --profile web` boot
 #
@@ -20,7 +20,9 @@ set -euo pipefail
 HUB="${AGENTHUB_DIR:-$HOME/AgentHub}"
 DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 DSH_HARNESS="${AGENTHARNESS_DIR:-$HOME/Developer/agent-harness}"
+AGENTHUB_DIR_REL="${AGENTHUB_DIR_REL:-contrib/agenthub}"
 AGENTHUB_REPO="${AGENTHUB_REPO:-sxzl798/agent-harness}"
+AGENTHUB_PLUGIN_PATH="$DSH_HARNESS/$AGENTHUB_DIR_REL/src/index.ts"
 
 note() { printf '\033[1m%s\033[0m\n' "$*"; }
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
@@ -55,31 +57,53 @@ else
   ok "cloned"
 fi
 
-# 3. Install + build
-note "[4/5] Installing dependencies + building"
+# 3. Install
+note "[4/5] Installing dependencies"
 cd "$DSH_HARNESS"
-# The user's git config may set core.hooksPath to Codex's global
-# lefthook dir, which blocks this monorepo's lefthook install. The
-# escape hatch documented in deepseek-harness is the env var below.
 DSH_LEFTHOOK_ALLOW_HOOKS_PATH_OVERRIDE=1 pnpm install --prefer-offline 2>&1 | tail -3
 ok "pnpm install"
-DSH_LEFTHOOK_ALLOW_HOOKS_PATH_OVERRIDE=1 pnpm run build 2>&1 | tail -3 || true
-ok "pnpm run build"
+# NOTE: We deliberately skip `pnpm run build` here. The plugin lives
+# under contrib/ outside the monorepo's packages/*/* glob, so dsh's
+# `pnpm run build:lib` does not see it. dsh loads the plugin at runtime
+# via `pnpm tsx` on the .ts source (see the overlay below), so a
+# monorepo build is not required for the plugin to work.
+warn "skipped pnpm run build: this fork only ships the plugin source under"
+warn "contrib/, which dsh loads at runtime via tsx."
 
 # 4. Wire the plugin into the dsh web profile via an overlay
 note "[5/5] Wiring plugin into dsh web profile"
 mkdir -p "$DSH_HOME/profiles/web"
 OVERLAY="$DSH_HOME/profiles/web/cordis.patch.yml"
-# Idempotent: write the file only if it doesn't already reference agenthub.
-if grep -q 'agenthub' "$OVERLAY" 2>/dev/null; then
-  ok "overlay already references agenthub"
-else
-  cat >> "$OVERLAY" <<EOF
 
-# agenthub plugin overlay (added by setup.sh)
+# Idempotency: check whether the overlay already references the agenthub
+# plugin (any absolute path ending in the canonical plugin source). This
+# avoids duplicating the entry on re-runs without trying to parse YAML.
+if grep -q -E "name:.*contrib/agenthub/src/index\\.ts" "$OVERLAY" 2>/dev/null; then
+  ok "overlay already references agenthub"
+elif grep -q -E "id:\\s*agenthub" "$OVERLAY" 2>/dev/null; then
+  # Path moved between versions; rewrite to canonical location.
+  warn "overlay references agenthub from an old path; rewriting"
+  python3 -c "
+import re, sys
+p = '$OVERLAY'
+text = open(p).read()
+text = re.sub(
+  r\"(- id:\\s*agenthub\\b.*?name:.*?contrib/agenthub/src/index\\.ts|sd-|[\\s\\S]*?- insert:\\s*\\n\\s*- id:\\s*agenthub\\b[\\s\\S]*?name:.*?)\",
+  lambda m: m.group(1).split('name:')[0] + \"name: '$AGENTHUB_PLUGIN_PATH'\\n\",
+  text, count=1, flags=re.MULTILINE)
+open(p, 'w').write(text)
+print('  rewrote overlay entry to use $AGENTHUB_PLUGIN_PATH')
+"
+else
+  # The shipped overlay is `[]`; we replace it with the merged content.
+  # dsh expects a single top-level YAML array, so we write one document.
+  cat > "$OVERLAY" <<EOF
+# Your patch layer for this dsh profile. The top-level value MUST be
+# a YAML array of loader patch entries (inserts / overrides / disables).
+# Added by sxzl798/agent-harness fork's setup.sh.
 - insert:
     - id: agenthub
-      name: '$DSH_HARNESS/packages/agenthub/agenthub/src/index.ts'
+      name: '$AGENTHUB_PLUGIN_PATH'
 EOF
   ok "overlay written: $OVERLAY"
 fi

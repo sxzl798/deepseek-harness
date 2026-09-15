@@ -1,7 +1,7 @@
 // Quick smoke test for SessionRecorder.
 
-import { SessionRecorder } from '../packages/agenthub/agenthub/src/sessions.ts'
-import { RegistryService } from '../packages/agenthub/agenthub/src/registry.ts'
+import { SessionRecorder } from '../contrib/agenthub/src/sessions.ts'
+import { RegistryService } from '../contrib/agenthub/src/registry.ts'
 
 class MockCtx {
   reflect = { provide: () => undefined }

@@ -1,9 +1,9 @@
 // Quick smoke test for RegistryService + SkillsService + DoctorService.
 // Run from repo root: pnpm tsx scripts/smoke-agenthub.mts
 
-import { SkillsService } from '../packages/agenthub/agenthub/src/skills.ts'
-import { RegistryService } from '../packages/agenthub/agenthub/src/registry.ts'
-import { DoctorService } from '../packages/agenthub/agenthub/src/doctor.ts'
+import { SkillsService } from '../contrib/agenthub/src/skills.ts'
+import { RegistryService } from '../contrib/agenthub/src/registry.ts'
+import { DoctorService } from '../contrib/agenthub/src/doctor.ts'
 
 // Minimal Cordis-compatible ctx: Service constructor only needs reflect.provide.
 class MockCtx {

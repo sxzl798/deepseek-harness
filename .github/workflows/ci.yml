@@ -47,7 +47,7 @@ jobs:
         run: |
           DSH_LEFTHOOK_ALLOW_HOOKS_PATH_OVERRIDE=1 pnpm dsh \
             --profile web \
-            --patch ./packages/agenthub/agenthub/cordis.yml \
+            --patch ./contrib/agenthub/cordis.yml \
             --no-open --port 18999 2>&1 &
           DSH_PID=$!
           for i in $(seq 1 20); do

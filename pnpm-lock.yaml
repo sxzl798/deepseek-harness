@@ -884,12 +884,6 @@ importers:
         specifier: workspace:^
         version: link:../../interaction/user-approval
 
-  packages/agenthub/agenthub:
-    devDependencies:
-      '@deepseek-ai/cordis':
-        specifier: workspace:^
-        version: link:../../../vendor/cordis
-
   packages/api/gateway:
     dependencies:
       '@deepseek-ai/dsh-deque':
