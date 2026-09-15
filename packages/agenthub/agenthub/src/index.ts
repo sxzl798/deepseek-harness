@@ -10,6 +10,7 @@
  *   /agenthub remove <name>         — unregister a project
  *   /agenthub skills list           — list hub skills with descriptions
  *   /agenthub skills show <name>    — show one skill's full body
+ *   /agenthub doctor [name|all]     — run agent-portable compliance checks
  *
  * @module @sxzl798/agenthub
  */
@@ -19,10 +20,11 @@ import { CommandDefinitionId } from '@deepseek-ai/dsh-commands/brand'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import { RegistryService, SCHEMA_VERSION, type Project } from './registry.ts'
 import { SkillsService, type Skill } from './skills.ts'
+import { DoctorService, type DoctorReport } from './doctor.ts'
 
 export const name = 'agenthub'
 
-export const version = '0.3.0'
+export const version = '0.4.0'
 
 /** We depend on `commands`; we provide `agenthub.registry` and `agenthub.skills`. */
 export const inject = ['commands'] as const
@@ -32,6 +34,7 @@ declare module '@deepseek-ai/cordis' {
   interface Context {
     'agenthub.registry': RegistryService
     'agenthub.skills': SkillsService
+    'agenthub.doctor': DoctorService
   }
 }
 
@@ -41,6 +44,7 @@ declare module '@deepseek-ai/cordis' {
 
 type RegistryHandlers = ReturnType<typeof makeRegistryHandlers>
 type SkillHandlers = ReturnType<typeof makeSkillHandlers>
+type DoctorHandlers = ReturnType<typeof makeDoctorHandlers>
 
 function makeRegistryHandlers(getRegistry: () => RegistryService) {
   return {
@@ -161,6 +165,51 @@ function makeSkillHandlers(getSkills: () => SkillsService) {
   }
 }
 
+function makeDoctorHandlers(
+  getRegistry: () => RegistryService,
+  getDoctor: () => DoctorService,
+) {
+  async function runOne(name: string): Promise<CommandResult> {
+    const project = await getRegistry().show(name)
+    if (!project) return { kind: 'error', text: `project '${name}' is not registered` }
+    const report = await getDoctor().check(project.path)
+    return { kind: 'success', text: DoctorService.formatReport(report) }
+  }
+
+  return {
+    async run(target?: string): Promise<CommandResult> {
+      const registry = getRegistry()
+      const doctor = getDoctor()
+
+      if (!target || target === 'all') {
+        const projects = await registry.list()
+        const names = Object.keys(projects).sort()
+        if (names.length === 0) {
+          return { kind: 'success', text: 'No projects registered.' }
+        }
+        const lines: string[] = [`Doctor all (${names.length} project(s))`]
+        let totalPassed = 0
+        let totalWarned = 0
+        let totalFailed = 0
+        for (const n of names) {
+          const project = projects[n]
+          const report = await doctor.check(project.path)
+          const s = `${report.passed}p ${report.warned}w ${report.failed}f`
+          lines.push(`  ${n.padEnd(20)} ${s}`)
+          totalPassed += report.passed
+          totalWarned += report.warned
+          totalFailed += report.failed
+        }
+        lines.push('')
+        lines.push(`Totals: ${totalPassed} passed, ${totalWarned} warnings, ${totalFailed} failures`)
+        return { kind: 'success', text: lines.join('\n') }
+      }
+
+      return runOne(target)
+    },
+  }
+}
+
 /* ------------------------------------------------------------------------- */
 /*  Plugin entry                                                             */
 /* ------------------------------------------------------------------------- */
@@ -183,6 +232,8 @@ export function apply(ctx: Context): void {
 
   const regHandlers = makeRegistryHandlers(() => registry)
   const skillHandlers = makeSkillHandlers(() => skills)
+  const doctor = new DoctorService(ctx)
+  const doctorHandlers = makeDoctorHandlers(() => registry, () => doctor)
 
   ctx.effect(function* () {
     yield ctx.commands.register({
@@ -206,6 +257,10 @@ export function apply(ctx: Context): void {
           }
         }
 
+        if (head === 'doctor') {
+          return doctorHandlers.run(rest[0])
+        }
+
         switch (head) {
           case 'list':
             return regHandlers.list()
@@ -218,7 +273,7 @@ export function apply(ctx: Context): void {
           default:
             return {
               kind: 'error' as const,
-              text: `unknown subcommand '${head ?? ''}'. Use: /agenthub <list|show|add|remove|skills>`,
+              text: `unknown subcommand '${head ?? ''}'. Use: /agenthub <list|show|add|remove|skills|doctor>`,
             }
         }
       },
