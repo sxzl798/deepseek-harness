@@ -1,7 +1,16 @@
 /**
- * AgentHub — Phase 0 entry. The hello-world plugin proves dsh loads us on
- * every `--profile web` boot via the `apply()` trace below. Phase 1 wires
- * the `RegistryService` (projects.json) into the live tree.
+ * AgentHub — Phase 1.B entry. Mounts the registry and skills services and
+ * registers one `/agenthub` slash command that dispatches on its first
+ * argument.
+ *
+ * Slash-command surface (v0.3.0):
+ *   /agenthub list                  — list registered projects
+ *   /agenthub show <name>           — show one project's metadata
+ *   /agenthub add <path>            — register a new project
+ *   /agenthub remove <name>         — unregister a project
+ *   /agenthub skills list           — list hub skills with descriptions
+ *   /agenthub skills show <name>    — show one skill's full body
+ *
  * @module @sxzl798/agenthub
  */
 
@@ -9,40 +18,33 @@ import { type Context } from '@deepseek-ai/cordis'
 import { CommandDefinitionId } from '@deepseek-ai/dsh-commands/brand'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import { RegistryService, SCHEMA_VERSION, type Project } from './registry.ts'
+import { SkillsService, type Skill } from './skills.ts'
 
 export const name = 'agenthub'
 
-export const version = '0.2.0'
+export const version = '0.3.0'
 
-/** We depend on `commands` (for slash commands) and provide `agenthub.registry`. */
+/** We depend on `commands`; we provide `agenthub.registry` and `agenthub.skills`. */
 export const inject = ['commands'] as const
 
 /** Pulled in by other agenthub-* plugins once we land them. */
 declare module '@deepseek-ai/cordis' {
   interface Context {
     'agenthub.registry': RegistryService
+    'agenthub.skills': SkillsService
   }
 }
 
-/** Slash-command handler factory: lists projects as a fixed-width table. */
-async function handleList(invocation: CommandInvocation): Promise<CommandResult> {
-  const args = invocation.rawInput.trim().split(/\s+/).filter(Boolean)
-  if (args.length > 0) {
-    return { kind: 'error', text: 'Usage: /agenthub list (no arguments)' }
-  }
-  const fs = await import('node:fs/promises')
-  const registry = RegistryService
-  const hubDir = registry.defaultHubDir()
-  const reg = new registry(JSON.parse('{}'), { hubDir } as any) // unused; real one comes via ctx
-  // The real access goes through ctx below; this branch is unreachable.
-  void fs
-  return { kind: 'error', text: 'unreachable' }
-}
+/* ------------------------------------------------------------------------- */
+/*  Handlers                                                                */
+/* ------------------------------------------------------------------------- */
 
-/** Build the slash command handler that uses ctx.agenthub.registry. */
-function makeHandlers(getRegistry: () => RegistryService) {
+type RegistryHandlers = ReturnType<typeof makeRegistryHandlers>
+type SkillHandlers = ReturnType<typeof makeSkillHandlers>
+
+function makeRegistryHandlers(getRegistry: () => RegistryService) {
   return {
-    async list(_inv: CommandInvocation): Promise<CommandResult> {
+    async list(): Promise<CommandResult> {
       const projects = await getRegistry().list()
       const names = Object.keys(projects).sort()
       if (names.length === 0) {
@@ -63,7 +65,7 @@ function makeHandlers(getRegistry: () => RegistryService) {
       return { kind: 'success', text: lines.join('\n') }
     },
 
-    async show(_inv: CommandInvocation, name?: string): Promise<CommandResult> {
+    async show(name?: string): Promise<CommandResult> {
       if (!name) return { kind: 'error', text: 'Usage: /agenthub show <name>' }
       const project = await getRegistry().show(name)
       if (!project) {
@@ -83,7 +85,7 @@ function makeHandlers(getRegistry: () => RegistryService) {
       }
     },
 
-    async add(_inv: CommandInvocation, path?: string): Promise<CommandResult> {
+    async add(path?: string): Promise<CommandResult> {
       if (!path) {
         return {
           kind: 'error',
@@ -117,7 +119,7 @@ function makeHandlers(getRegistry: () => RegistryService) {
       }
     },
 
-    async remove(_inv: CommandInvocation, name?: string): Promise<CommandResult> {
+    async remove(name?: string): Promise<CommandResult> {
       if (!name) return { kind: 'error', text: 'Usage: /agenthub remove <name>' }
       try {
         await getRegistry().remove(name)
@@ -129,51 +131,97 @@ function makeHandlers(getRegistry: () => RegistryService) {
   }
 }
 
+function makeSkillHandlers(getSkills: () => SkillsService) {
+  return {
+    async list(): Promise<CommandResult> {
+      const table = await getSkills().summaryTable()
+      return { kind: 'success', text: table }
+    },
+
+    async show(name?: string): Promise<CommandResult> {
+      if (!name) {
+        return { kind: 'error', text: 'Usage: /agenthub skills show <name>' }
+      }
+      const skill: Skill | null = await getSkills().show(name)
+      if (!skill) {
+        return { kind: 'error', text: `skill '${name}' not found in hub` }
+      }
+      return {
+        kind: 'success',
+        text:
+          `${skill.name}\n` +
+          `  description: ${skill.description}\n` +
+          (skill.whenToUse ? `  whenToUse:   ${skill.whenToUse}\n` : '') +
+          `  file:        ${skill.filePath}\n` +
+          `  updated:     ${new Date(skill.mtimeMs).toISOString()}\n\n` +
+          '---\n\n' +
+          skill.body,
+      }
+    },
+  }
+}
+
+/* ------------------------------------------------------------------------- */
+/*  Plugin entry                                                             */
+/* ------------------------------------------------------------------------- */
+
 /**
  * Plugin entry: dsh invokes this once after resolving our inject deps.
- * Mounts the RegistryService on ctx.agenthub.registry and registers four
- * `/agenthub <subcmd>` slash commands.
+ * Mounts the RegistryService + SkillsService on the cordis context, then
+ * registers one `/agenthub` slash command that dispatches on subcommand.
  */
 export function apply(ctx: Context): void {
-  // Boot trace (Phase 0 carryover): the line tells us we loaded even when
-  // no agent interaction runs.
-  // eslint-disable-next-line no-console
-  console.log(`[agenthub v${version}] apply() — schema v${SCHEMA_VERSION}, hub=${RegistryService.defaultHubDir()}`)
-
   const hubDir = RegistryService.defaultHubDir()
-  // Service constructor registers itself on ctx under 'agenthub.registry'.
-  // No additional provide() needed.
+  // Service constructors auto-register under their declared ctx key.
   const registry = new RegistryService(ctx, { hubDir })
+  const skills = new SkillsService(ctx, { hubDir })
 
-  // Bind after the service exists so handlers always see a live registry.
-  const handlers = makeHandlers(() => registry)
-  const cmd = (name: string, description: string) =>
-    ctx.commands.register({
-      definitionId: CommandDefinitionId(`@sxzl798/agenthub/${name}`),
+  // eslint-disable-next-line no-console
+  console.log(
+    `[agenthub v${version}] apply() — schema v${SCHEMA_VERSION}, hub=${hubDir}, skills=${skills.skillsDir}`,
+  )
+
+  const regHandlers = makeRegistryHandlers(() => registry)
+  const skillHandlers = makeSkillHandlers(() => skills)
+
+  ctx.effect(function* () {
+    yield ctx.commands.register({
+      definitionId: CommandDefinitionId('@sxzl798/agenthub'),
       name: 'agenthub',
-      description,
+      description:
+        `AgentHub v${version} — list/show/add/remove projects or list/show skills. ` +
+        'Examples: /agenthub list | /agenthub show <name> | /agenthub skills list',
       handler: (inv: CommandInvocation) => {
-        const args = inv.rawInput.trim().split(/\s+/).filter(Boolean)
-        const sub = args[0]
-        const rest = args.slice(1)
-        switch (sub) {
-          case 'list': return handlers.list(inv)
-          case 'show': return handlers.show(inv, rest[0])
-          case 'add': return handlers.add(inv, rest[0])
-          case 'remove': return handlers.remove(inv, rest[0])
+        const tokens = inv.rawInput.trim().split(/\s+/).filter(Boolean)
+        const head = tokens[0]
+        const rest = tokens.slice(1)
+
+        if (head === 'skills') {
+          const sub = rest[0]
+          if (!sub || sub === 'list') return skillHandlers.list()
+          if (sub === 'show') return skillHandlers.show(rest[1])
+          return {
+            kind: 'error' as const,
+            text: `unknown skills subcommand '${sub}'. Use: /agenthub skills <list|show>`,
+          }
+        }
+
+        switch (head) {
+          case 'list':
+            return regHandlers.list()
+          case 'show':
+            return regHandlers.show(rest[0])
+          case 'add':
+            return regHandlers.add(rest[0])
+          case 'remove':
+            return regHandlers.remove(rest[0])
           default:
             return {
               kind: 'error' as const,
-              text: `unknown subcommand '${sub}'. Usage: /agenthub <list|show|add|remove>`,
+              text: `unknown subcommand '${head ?? ''}'. Use: /agenthub <list|show|add|remove|skills>`,
             }
         }
       },
     })
-
-  ctx.effect(function* () {
-    yield cmd('agenthub', `AgentHub v${version} — list/show/add/remove projects in ~/AgentHub/projects.json.`)
   }, 'agenthub command lifecycle')
-
-  // keep eslint quiet about unused helper
-  void handleList
 }
