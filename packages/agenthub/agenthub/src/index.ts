@@ -23,10 +23,12 @@ import { SkillsService, type Skill } from './skills.ts'
 import { DoctorService, type DoctorReport } from './doctor.ts'
 import { registerWebRoutes } from './web.ts'
 import { SessionRecorder, type SessionRecord } from './sessions.ts'
+import { ProfilesService } from './profiles.ts'
+import { BundlesService } from './bundles.ts'
 
 export const name = 'agenthub'
 
-export const version = '0.6.0'
+export const version = '0.7.0'
 
 /** We depend on `commands` and `webServer`; we provide the three services. */
 export const inject = ['commands', 'webServer'] as const
@@ -237,6 +239,8 @@ export function apply(ctx: Context): void {
   const doctor = new DoctorService(ctx)
   const doctorHandlers = makeDoctorHandlers(() => registry, () => doctor)
   const sessions = new SessionRecorder(hubDir)
+  const profiles = new ProfilesService(ctx, { hubDir })
+  const bundles = new BundlesService(ctx, { hubDir })
 
   ctx.effect(function* () {
     yield ctx.commands.register({
@@ -256,6 +260,47 @@ export function apply(ctx: Context): void {
           const limit = Number.isFinite(n) && n > 0 && n <= 100 ? Math.floor(n) : 10
           const records = await sessions.tail(limit)
           return { kind: 'success', text: SessionRecorder.formatRecords(records) }
+        }
+
+        // Special case: /agenthub profile — switch / list.
+        if (head === 'profile') {
+          const sub = rest[0]
+          if (!sub) {
+            return { kind: 'success', text: await profiles.summary() }
+          }
+          if (sub === 'show') {
+            const name = rest[1]
+            if (!name) return { kind: 'error', text: 'Usage: /agenthub profile show <name>' }
+            const body = await profiles.get(name)
+            if (!body) return { kind: 'error', text: `profile '${name}' not found` }
+            const prefix = await profiles.getPromptPrefix(name)
+            return {
+              kind: 'success',
+              text: `${name}\n---\n${body}\n---\nAgent prompt prefix:\n${prefix || '(none)'}`,
+            }
+          }
+          // bare name → activate
+          await profiles.setActive(sub)
+          return { kind: 'success', text: `✓ active profile: ${sub}` }
+        }
+
+        // Special case: /agenthub bundle — list / show.
+        if (head === 'bundle') {
+          const sub = rest[0]
+          if (!sub || sub === 'list') {
+            return { kind: 'success', text: await bundles.summary() }
+          }
+          if (sub === 'show') {
+            const name = rest[1]
+            if (!name) return { kind: 'error', text: 'Usage: /agenthub bundle show <name>' }
+            const b = await bundles.get(name)
+            if (!b) return { kind: 'error', text: `bundle '${name}' not found` }
+            return { kind: 'success', text: BundlesService.format(b) }
+          }
+          return {
+            kind: 'error' as const,
+            text: `unknown bundle subcommand '${sub}'. Use: /agenthub bundle <list|show>`,
+          }
         }
 
         let result: CommandResult
@@ -278,7 +323,7 @@ export function apply(ctx: Context): void {
               case 'remove': result = await regHandlers.remove(rest[0]); break
               default: result = {
                 kind: 'error' as const,
-                text: `unknown subcommand '${head ?? ''}'. Use: /agenthub <list|show|add|remove|skills|doctor|session>`,
+                text: `unknown subcommand '${head ?? ''}'. Use: /agenthub <list|show|add|remove|skills|doctor|session|profile|bundle>`,
               }
             }
           }
