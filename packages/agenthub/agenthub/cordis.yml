@@ -1,0 +1,11 @@
+# Cordis overlay that inserts the local agenthub plugin.
+# Used via: pnpm dsh web --patch ./packages/agenthub/agenthub/cordis.yml
+#
+# In production, add the plugin to apps/cli dependencies and register
+# it in packages/bundle/web-app/cordis.patch.yml. This overlay is the
+# fastest dev loop: zero build, edit-then-restart.
+
+- insert:
+    - id: agenthub
+      name: '/Users/hzj/Developer/agent-harness/packages/agenthub/agenthub/src/index.ts'
+      config: {}
