@@ -1,91 +1,129 @@
 # @sxzl798/agenthub
 
-A DeepSeek Harness plugin that replaces the bash `~/AgentHub/` tool with a
-Cordis-native service. The plugin owns the canonical project registry
-(`projects.json`) and exposes slash commands the AI agent can call inside the
-DSH web UI.
+A DeepSeek Harness plugin that exposes the user-owned canonical Skill and
+Project registry to any AI agent running inside dsh.
 
-## Status: v0.2.0 (Phase 1.A — registry live)
+## Install
 
-| Version | Feature |
+```bash
+curl -fsSL https://raw.githubusercontent.com/sxzl798/agent-harness/master/scripts/setup.sh | bash
+```
+
+Or read [scripts/setup.sh](./scripts/setup.sh) and run it manually — it just
+clones the fork, builds, and writes one overlay file to `~/.dsh/profiles/web/`.
+
+## What it does
+
+Adds the following to every `pnpm dsh --profile web` boot:
+
+### Slash command: `/agenthub`
+
+| Subcommand | Effect |
 |---|---|
-| **v0.1.0** | Hello-world: proves plugin loads into `dsh --profile web` |
-| **v0.2.0** | `RegistryService` mounts on `ctx.agenthub.registry`; `/agenthub list\|show\|add\|remove` slash commands |
-| v0.3.0 | `SkillsService` for the hub skills directory |
-| v0.4.0 | `DoctorService` wrapping the agent-doctor checks |
-| v0.5.0 | Web UI route mounted on the dsh web framework |
-| v0.6.0 | Profile + bundle services (focus/explore/ship + dsh-ppt/dsh-web/...) |
+| `/agenthub list`             | List every registered project (table) |
+| `/agenthub show <name>`      | Show one project's metadata |
+| `/agenthub add <path>`       | Register a new project |
+| `/agenthub remove <name>`    | Unregister a project |
+| `/agenthub skills list`      | List hub skills (name + description) |
+| `/agenthub skills show <n>`  | Show one skill's full body |
+| `/agenthub doctor [name]`    | Run agent-portable checks; default `all` |
+| `/agenthub profile`          | List profiles with active marker |
+| `/agenthub profile show <n>` | Show profile body + extracted prompt prefix |
+| `/agenthub profile <name>`   | Activate a profile (writes `.active_profile`) |
+| `/agenthub bundle`           | List bundles |
+| `/agenthub bundle show <n>`  | Show one bundle (yaml dump) |
+| `/agenthub session [N]`      | Tail the last N session log entries |
 
-## Slash commands
+Every invocation (except `session`) is recorded in
+`~/AgentHub/sessions/<YYYY-MM-DD>.jsonl` so you can audit what your AI
+agents have been doing.
 
-The plugin registers `/agenthub` as a single slash command that dispatches
-on its first argument:
+### REST API: `/agenthub-api/`
 
-| Command | Effect |
+| Endpoint | Effect |
 |---|---|
-| `/agenthub list`            | List all registered projects (table) |
-| `/agenthub show <name>`     | Print one project's metadata |
-| `/agenthub add <path>`      | Register a new project (path is required; type/tags default) |
-| `/agenthub remove <name>`   | Unregister a project |
+| `GET /agenthub-api/projects`             | Every project with a per-project doctor summary |
+| `GET /agenthub-api/skills`               | Hub skills |
+| `GET /agenthub-api/status`               | Hub summary (counts, paths, active profile) |
+| `GET /agenthub-api/doctor/<name\|all>`   | Agent-portable checks |
+| `POST /agenthub-api/add`                 | Register a project (`{path, name?}`) |
+| `POST /agenthub-api/remove`              | Unregister (`{name}`) |
 
-All commands return text suitable for the AI agent's context.
+We live at `/agenthub-api/` instead of `/api/` because dsh routes
+`/api/**` through the browser trust fence, which would 401 any
+unauthenticated curl call.
 
-## Service contract
+### Services
 
 ```ts
 declare module '@deepseek-ai/cordis' {
   interface Context {
     'agenthub.registry': RegistryService
+    'agenthub.skills': SkillsService
+    'agenthub.doctor': DoctorService
+    'agenthub.profiles': ProfilesService
+    'agenthub.bundles': BundlesService
   }
-}
-
-class RegistryService extends Service {
-  static defaultHubDir(): string        // env-driven
-  async list(): Promise<Record<string, Project>>
-  async show(name: string): Promise<Project | null>
-  async add(name: string, project: Project): Promise<void>
-  async remove(name: string): Promise<void>
-  async goPath(name: string): Promise<string | null>
-  async read(): Promise<RegistryFile>  // raw, for migrations
-  async write(data: RegistryFile): Promise<void>  // atomic rename
 }
 ```
 
-Other plugins can `inject: ['agenthub.registry']` and consume the service.
+Other plugins can `inject: ['agenthub.registry', ...]` and consume
+these services directly.
 
 ## Layout
 
 ```
 packages/agenthub/agenthub/
 ├── src/
-│   ├── index.ts        # Plugin entry: apply(ctx); mounts service + slash commands
-│   └── registry.ts     # RegistryService class + Project/RegistryFile types
-├── package.json        # Workspace member
-├── cordis.yml          # Overlay that registers this plugin in the web profile
-└── README.md           # this file
+│   ├── index.ts        # apply(ctx): mounts services, registers commands
+│   ├── registry.ts     # RegistryService — projects.json
+│   ├── skills.ts       # SkillsService — ~/AgentHub/skills/
+│   ├── doctor.ts       # DoctorService — 7 agent-portable checks
+│   ├── profiles.ts     # ProfilesService — focus/explore/ship
+│   ├── bundles.ts      # BundlesService — dsh-ppt/dsh-web/dsh-mcp
+│   ├── sessions.ts     # SessionRecorder — JSONL log
+│   └── web.ts          # REST endpoints on dsh webServer
+├── package.json
+├── cordis.yml          # how dsh loader mounts this plugin
+└── README.md          # this file
+
+scripts/
+├── setup.sh           # one-command install
+├── smoke-agenthub.mts # exercises all services outside dsh
+├── smoke-sessions.mts  # exercises session log
+└── smoke-profiles-bundles.mts
 ```
 
-## How it loads
+## Compatibility with the bash `~/AgentHub/`
 
-```sh
-pnpm dsh --profile web --patch ./packages/agenthub/agenthub/cordis.yml
+The plugin reads the **same** files the bash `~/AgentHub/dsh` script
+does (`projects.json`, `skills/`, `profiles/`, `bundles/`, etc.), so
+the two implementations stay interoperable. A user can mix:
+
+```bash
+# Register a project via the plugin slash command...
+/agenthub add ~/code/newproj
+
+# ...and the bash tool will see it on the next list.
+~/AgentHub/dsh list
 ```
 
-The `--patch` argument tells the dsh loader to apply `cordis.yml` as a
-transient overlay on top of the shipped web profile. The overlay inserts
-one entry:
+The plugin writes through `RegistryService.add/remove`, which uses
+atomic rename on `projects.json`. The bash `~/AgentHub/dsh add/remove`
+also writes through the same file. Last writer wins, but the file
+format is stable.
 
-```yaml
-- insert:
-    - id: agenthub
-      name: 'file:///absolute/path/to/packages/agenthub/agenthub/src/index.ts'
-```
+## Status: v0.7.0
 
-The loader reads `src/index.ts` directly via `tsx`, calls its `apply(ctx)`,
-and the registry service + slash commands become part of the running tree.
+| Version | Feature |
+|---|---|
+| v0.2.0 | `RegistryService` — `projects.json` with atomic writes |
+| v0.3.0 | `SkillsService` — SKILL.md frontmatter parser |
+| v0.4.0 | `DoctorService` — 7 agent-portable compliance checks |
+| v0.5.0 | REST API on the dsh webServer |
+| v0.6.0 | `SessionRecorder` — append-only JSONL session log |
+| v0.7.0 | `ProfilesService` + `BundlesService` |
+| v1.0.0 | Setup script + smoke tests + upstream PR draft |
 
-## Next steps (v0.3.0)
-
-- `SkillsService` reading `~/AgentHub/skills/`
-- `/agenthub skills list` and `/agenthub skills sync` slash commands
-- `/agenthub status` upgraded to also report skill count
+See `docs/HANDOFF.md` in the fork's `loopagent/` mirror for the
+full Phase 0-5 development log.
