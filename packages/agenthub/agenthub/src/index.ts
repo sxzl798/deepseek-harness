@@ -22,10 +22,11 @@ import { RegistryService, SCHEMA_VERSION, type Project } from './registry.ts'
 import { SkillsService, type Skill } from './skills.ts'
 import { DoctorService, type DoctorReport } from './doctor.ts'
 import { registerWebRoutes } from './web.ts'
+import { SessionRecorder, type SessionRecord } from './sessions.ts'
 
 export const name = 'agenthub'
 
-export const version = '0.5.0'
+export const version = '0.6.0'
 
 /** We depend on `commands` and `webServer`; we provide the three services. */
 export const inject = ['commands', 'webServer'] as const
@@ -235,6 +236,7 @@ export function apply(ctx: Context): void {
   const skillHandlers = makeSkillHandlers(() => skills)
   const doctor = new DoctorService(ctx)
   const doctorHandlers = makeDoctorHandlers(() => registry, () => doctor)
+  const sessions = new SessionRecorder(hubDir)
 
   ctx.effect(function* () {
     yield ctx.commands.register({
@@ -242,41 +244,59 @@ export function apply(ctx: Context): void {
       name: 'agenthub',
       description:
         `AgentHub v${version} — list/show/add/remove projects or list/show skills. ` +
-        'Examples: /agenthub list | /agenthub show <name> | /agenthub skills list',
-      handler: (inv: CommandInvocation) => {
+        'Examples: /agenthub list | /agenthub show <name> | /agenthub session 10',
+      handler: async (inv: CommandInvocation): Promise<CommandResult> => {
         const tokens = inv.rawInput.trim().split(/\s+/).filter(Boolean)
         const head = tokens[0]
         const rest = tokens.slice(1)
 
-        if (head === 'skills') {
-          const sub = rest[0]
-          if (!sub || sub === 'list') return skillHandlers.list()
-          if (sub === 'show') return skillHandlers.show(rest[1])
-          return {
-            kind: 'error' as const,
-            text: `unknown skills subcommand '${sub}'. Use: /agenthub skills <list|show>`,
-          }
+        // Special case: read the session log itself (no recursive logging).
+        if (head === 'session') {
+          const n = Number(rest[0] ?? '10')
+          const limit = Number.isFinite(n) && n > 0 && n <= 100 ? Math.floor(n) : 10
+          const records = await sessions.tail(limit)
+          return { kind: 'success', text: SessionRecorder.formatRecords(records) }
         }
 
-        if (head === 'doctor') {
-          return doctorHandlers.run(rest[0])
-        }
-
-        switch (head) {
-          case 'list':
-            return regHandlers.list()
-          case 'show':
-            return regHandlers.show(rest[0])
-          case 'add':
-            return regHandlers.add(rest[0])
-          case 'remove':
-            return regHandlers.remove(rest[0])
-          default:
-            return {
+        let result: CommandResult
+        try {
+          if (head === 'skills') {
+            const sub = rest[0]
+            if (!sub || sub === 'list') result = await skillHandlers.list()
+            else if (sub === 'show') result = await skillHandlers.show(rest[1])
+            else result = {
               kind: 'error' as const,
-              text: `unknown subcommand '${head ?? ''}'. Use: /agenthub <list|show|add|remove|skills|doctor>`,
+              text: `unknown skills subcommand '${sub}'. Use: /agenthub skills <list|show>`,
             }
+          } else if (head === 'doctor') {
+            result = await doctorHandlers.run(rest[0])
+          } else {
+            switch (head) {
+              case 'list': result = await regHandlers.list(); break
+              case 'show': result = await regHandlers.show(rest[0]); break
+              case 'add': result = await regHandlers.add(rest[0]); break
+              case 'remove': result = await regHandlers.remove(rest[0]); break
+              default: result = {
+                kind: 'error' as const,
+                text: `unknown subcommand '${head ?? ''}'. Use: /agenthub <list|show|add|remove|skills|doctor|session>`,
+              }
+            }
+          }
+        } catch (err) {
+          result = { kind: 'error', text: (err as Error).message }
         }
+
+        // Persist every invocation to the session log. We log the FIRST
+        // line of the response so a long table doesn't bloat the JSONL.
+        const firstLine = result.text.split('\n', 1)[0] ?? ''
+        await sessions.append(
+          SessionRecorder.makeRecord(inv.rawInput, result.kind, firstLine),
+        ).catch((err) => {
+          // eslint-disable-next-line no-console
+          console.warn(`[agenthub] session log append failed: ${(err as Error).message}`)
+        })
+
+        return result
       },
     })
   }, 'agenthub command lifecycle')
