@@ -22,6 +22,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { RegistryService, type Project } from './registry.ts'
 import { SkillsService } from './skills.ts'
 import { DoctorService, type DoctorReport } from './doctor.ts'
+import { ContextService, type CurrentContext } from './context.ts'
 
 /** Tiny JSON helper. */
 function jsonResponse(res: ServerResponse, status: number, body: unknown): void {
@@ -57,6 +58,7 @@ export function registerWebRoutes(
   registry: RegistryService,
   skills: SkillsService,
   doctor: DoctorService,
+  context: ContextService,
 ): void {
   // GET /agenthub-api/projects — list every project with a doctor summary.
   ctx.effect(function* () {
@@ -103,6 +105,37 @@ export function registerWebRoutes(
       },
     })
   }, 'agenthub skills endpoint')
+
+  // GET /agenthub-api/context?cwd=... — handoff for the current dir.
+  //   JSON shape: { context: CurrentContext, markdown: string }
+  // Used by the bash ~/AgentHub/dsh inject command and by any agent
+  // that wants to read its continuation state programmatically.
+  ctx.effect(function* () {
+    yield ctx.webServer.register({
+      kind: 'prefix',
+      path: '/agenthub-api/context',
+      handler: async (req: IncomingMessage, res: ServerResponse) => {
+        try {
+          const url = new URL(req.url || '/agenthub-api/context', 'http://localhost')
+          const cwd = url.searchParams.get('cwd') || process.cwd()
+          const ctxObj = await context.current(cwd)
+          const want = url.searchParams.get('format')
+          if (want === 'markdown') {
+            res.statusCode = 200
+            res.setHeader('content-type', 'text/markdown; charset=utf-8')
+            res.end(ContextService.formatMarkdown(ctxObj))
+            return
+          }
+          jsonResponse(res, 200, {
+            context: ctxObj,
+            markdown: ContextService.formatMarkdown(ctxObj),
+          })
+        } catch (err) {
+          jsonResponse(res, 500, { error: (err as Error).message })
+        }
+      },
+    })
+  }, 'agenthub context endpoint')
 
   // GET /agenthub-api/doctor/<name|all>
   ctx.effect(function* () {

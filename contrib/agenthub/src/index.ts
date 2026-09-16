@@ -26,13 +26,14 @@ import { SessionRecorder, type SessionRecord } from './sessions.ts'
 import { ProfilesService } from './profiles.ts'
 import { BundlesService } from './bundles.ts'
 import { registerWebUi } from './ui.ts'
+import { ContextService, type CurrentContext } from './context.ts'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const name = 'agenthub'
 
-export const version = '0.8.0'
+export const version = '0.9.0'
 
 /** We depend on `commands` and `webServer`; we provide the three services. */
 export const inject = ['commands', 'webServer'] as const
@@ -245,6 +246,7 @@ export async function apply(ctx: Context): Promise<void> {
   const sessions = new SessionRecorder(hubDir)
   const profiles = new ProfilesService(ctx, { hubDir })
   const bundles = new BundlesService(ctx, { hubDir })
+  const context = new ContextService(ctx, { hubDir })
 
   ctx.effect(function* () {
     yield ctx.commands.register({
@@ -264,6 +266,18 @@ export async function apply(ctx: Context): Promise<void> {
           const limit = Number.isFinite(n) && n > 0 && n <= 100 ? Math.floor(n) : 10
           const records = await sessions.tail(limit)
           return { kind: 'success', text: SessionRecorder.formatRecords(records) }
+        }
+
+        // Special case: /agenthub current — find the project for the
+        // current working directory and emit a handoff block. Used by
+        // any agent entering a project to "pick up where I left off".
+        if (head === 'current' || head === 'inject') {
+          const cwd = rest[0] || process.cwd()
+          const ctxObj = await context.current(cwd)
+          return {
+            kind: 'success',
+            text: ContextService.formatMarkdown(ctxObj),
+          }
         }
 
         // Special case: /agenthub profile — switch / list.
@@ -351,7 +365,7 @@ export async function apply(ctx: Context): Promise<void> {
   }, 'agenthub command lifecycle')
 
   // v0.5.0: mount REST endpoints on the dsh web server.
-  registerWebRoutes(ctx, registry, skills, doctor)
+  registerWebRoutes(ctx, registry, skills, doctor, context)
 
   // v0.8.0: mount the dashboard HTML under /agenthub-ui.
   // Resolve the absolute path to contrib/agenthub/ui relative to this
