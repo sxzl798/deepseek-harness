@@ -50,18 +50,57 @@ jobs:
             --patch ./contrib/agenthub/cordis.yml \
             --no-open --port 18999 2>&1 &
           DSH_PID=$!
-          for i in $(seq 1 20); do
+          for i in $(seq 1 30); do
             sleep 1
-            if curl -s -o /dev/null -w "%{http_code}" http://localhost:18999/ 2>/dev/null | grep -q 200; then
+            if curl -s -o /dev/null -w "%{http_code}" http://localhost:18999/ 2>/dev/null | grep -qE '200|3..'; then
               break
             fi
           done
-          curl -s -o /dev/null -w "GET /agenthub-api/status = %{http_code}\n" http://localhost:18999/agenthub-api/status
-          curl -s http://localhost:18999/agenthub-api/status | head -1
-          kill $DSH_PID 2>/dev/null || true
-          wait $DSH_PID 2>/dev/null || true
-          # Fail the job if status endpoint didn't return 200
-          if ! curl -s -o /dev/null -w "%{http_code}" http://localhost:18999/agenthub-api/status | grep -q 200; then
-            echo "::error::status endpoint did not respond 200"
+
+          # REST API: status must return 200 with a projectCount field
+          STATUS_CODE=$(curl -s -o /tmp/status.json -w "%{http_code}" http://localhost:18999/agenthub-api/status)
+          echo "GET /agenthub-api/status = $STATUS_CODE"
+          if [ "$STATUS_CODE" != "200" ]; then
+            echo "::error::status endpoint did not return 200"
+            kill $DSH_PID 2>/dev/null || true
             exit 1
           fi
+          if ! grep -q projectCount /tmp/status.json; then
+            echo "::error::status response missing projectCount"
+            kill $DSH_PID 2>/dev/null || true
+            exit 1
+          fi
+
+          # REST API: projects endpoint must return 17 projects
+          PROJ_CODE=$(curl -s -o /tmp/projects.json -w "%{http_code}" http://localhost:18999/agenthub-api/projects)
+          echo "GET /agenthub-api/projects = $PROJ_CODE"
+          PROJ_COUNT=$(python3 -c "import json; print(len(json.load(open('/tmp/projects.json')).get('projects', [])))")
+          echo "project count = $PROJ_COUNT"
+          if [ "$PROJ_CODE" != "200" ] || [ "$PROJ_COUNT" -lt 1 ]; then
+            echo "::error::projects endpoint broken (code=$PROJ_CODE, count=$PROJ_COUNT)"
+            kill $DSH_PID 2>/dev/null || true
+            exit 1
+          fi
+
+          # Web UI: /agenthub-ui must serve the dashboard HTML
+          UI_CODE=$(curl -s -o /tmp/ui.html -w "%{http_code}" http://localhost:18999/agenthub-ui)
+          echo "GET /agenthub-ui = $UI_CODE"
+          if [ "$UI_CODE" != "200" ]; then
+            echo "::error::UI endpoint did not return 200"
+            kill $DSH_PID 2>/dev/null || true
+            exit 1
+          fi
+          if ! grep -q "agenthub 控制台" /tmp/ui.html; then
+            echo "::error::UI HTML missing expected Chinese title"
+            kill $DSH_PID 2>/dev/null || true
+            exit 1
+          fi
+          if ! grep -q "/agenthub-api/projects" /tmp/ui.html; then
+            echo "::error::UI HTML missing REST API endpoint reference"
+            kill $DSH_PID 2>/dev/null || true
+            exit 1
+          fi
+          echo "✓ All 3 endpoints + UI HTML OK"
+
+          kill $DSH_PID 2>/dev/null || true
+          wait $DSH_PID 2>/dev/null || true

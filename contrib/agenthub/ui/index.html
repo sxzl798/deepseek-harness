@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>agenthub 控制台</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #1c2128;
+    --border: #30363d;
+    --fg: #c9d1d9;
+    --fg-dim: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --red: #f85149;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC",
+                 "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  header {
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  header .hub-info {
+    color: var(--fg-dim); font-size: 12px; margin-left: auto;
+    font-family: ui-monospace, "SF Mono", monospace;
+  }
+  header .lang-switch { display: flex; gap: 4px; }
+  header .lang-switch button {
+    background: var(--panel-2); border: 1px solid var(--border);
+    color: var(--fg); padding: 4px 10px; border-radius: 4px;
+    font-size: 12px; cursor: pointer;
+  }
+  header .lang-switch button.active { background: var(--accent); color: var(--bg); }
+  main {
+    display: grid;
+    grid-template-columns: 1fr;
+    height: calc(100vh - 49px);
+    overflow-y: auto;
+    padding: 16px;
+  }
+  .summary {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+  }
+  .card .label {
+    color: var(--fg-dim);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 4px;
+  }
+  .card .value {
+    font-size: 24px;
+    font-weight: 600;
+  }
+  .card.green .value { color: var(--green); }
+  .card.yellow .value { color: var(--yellow); }
+  .card.red .value { color: var(--red); }
+  .toolbar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .toolbar input {
+    flex: 1;
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+  .toolbar select {
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+  .toolbar button {
+    background: var(--accent);
+    color: var(--bg);
+    border: 0;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  th, td {
+    text-align: left;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  th {
+    background: var(--panel-2);
+    color: var(--fg-dim);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  tr:last-child td { border-bottom: 0; }
+  .badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    background: var(--bg);
+    color: var(--fg-dim);
+    border: 1px solid var(--border);
+  }
+  .badge.passed { color: var(--green); border-color: var(--green); }
+  .badge.warn   { color: var(--yellow); border-color: var(--yellow); }
+  .badge.fail   { color: var(--red); border-color: var(--red); }
+  .pill {
+    background: var(--bg);
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 11px;
+    margin-right: 2px;
+  }
+  .status-dot {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    margin-right: 6px;
+  }
+  .status-dot.stable, .status-dot.mature { background: var(--green); }
+  .status-dot.bootstrap, .status-dot.scanned { background: var(--yellow); }
+  .status-dot.uninitialized { background: var(--fg-dim); }
+  code {
+    font-family: ui-monospace, monospace;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 12px;
+  }
+  .empty {
+    text-align: center;
+    color: var(--fg-dim);
+    padding: 40px 20px;
+  }
+  .toast {
+    position: fixed;
+    bottom: 16px;
+    right: 16px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    opacity: 0;
+    transition: opacity 0.2s;
+    max-width: 400px;
+  }
+  .toast.show { opacity: 1; }
+  .toast.success { border-left: 3px solid var(--green); }
+  .toast.error { border-left: 3px solid var(--red); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>agenthub 控制台</h1>
+  <span class="hub-info" id="hub-info">加载中…</span>
+  <div class="lang-switch">
+    <button id="lang-zh" class="active">中文</button>
+    <button id="lang-en">EN</button>
+  </div>
+  <button id="refresh-btn">刷新</button>
+</header>
+
+<main>
+  <div class="summary">
+    <div class="card"><div class="label">项目</div><div class="value" id="stat-projects">—</div></div>
+    <div class="card"><div class="label">Skill</div><div class="value" id="stat-skills">—</div></div>
+    <div class="card green"><div class="label">体检通过</div><div class="value" id="stat-passed">—</div></div>
+    <div class="card red"><div class="label">体检失败</div><div class="value" id="stat-failed">—</div></div>
+  </div>
+
+  <div class="toolbar">
+    <input id="search" placeholder="搜索名称 / 路径 / 标签…" />
+    <select id="type-filter"><option value="">所有类型</option></select>
+    <select id="status-filter"><option value="">所有状态</option></select>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>状态</th>
+        <th>名称</th>
+        <th>类型</th>
+        <th>体检</th>
+        <th>Bundle</th>
+        <th>路径</th>
+      </tr>
+    </thead>
+    <tbody id="projects-tbody">
+      <tr><td colspan="6" class="empty">加载项目中…</td></tr>
+    </tbody>
+  </table>
+</main>
+
+<div id="toast" class="toast"></div>
+
+<script>
+'use strict';
+
+const state = {
+  lang: 'zh',
+  projects: [],
+  skills: [],
+  doctor: [],
+  filter: { search: '', type: '', status: '' },
+};
+
+const i18n = {
+  zh: {
+    pageTitle: 'agenthub 控制台',
+    loading: '加载中…',
+    projectLabel: '项目',
+    skillLabel: 'Skill',
+    passedLabel: '体检通过',
+    failedLabel: '体检失败',
+    searchPlaceholder: '搜索名称 / 路径 / 标签…',
+    allTypes: '所有类型',
+    allStatuses: '所有状态',
+    noMatch: '没有匹配的项目',
+  },
+  en: {
+    pageTitle: 'agenthub dashboard',
+    loading: 'loading…',
+    projectLabel: 'Projects',
+    skillLabel: 'Skills',
+    passedLabel: 'Passed',
+    failedLabel: 'Failed',
+    searchPlaceholder: 'search name / path / tag…',
+    allTypes: 'all types',
+    allStatuses: 'all statuses',
+    noMatch: 'no projects match the filters',
+  },
+};
+
+function t(key) { return (i18n[state.lang] && i18n[state.lang][key]) || key; }
+
+function showToast(msg, kind = 'success') {
+  const t = document.getElementById('toast');
+  t.className = `toast show ${kind}`;
+  t.textContent = msg;
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[c]);
+}
+
+function statusDotClass(status) {
+  switch (status) {
+    case 'stable': case 'mature': return 'stable';
+    case 'bootstrap': case 'scanned': return 'bootstrap';
+    case 'uninitialized': return 'uninitialized';
+    default: return 'uninitialized';
+  }
+}
+
+function doctorBadge(d) {
+  if (!d) return '<span class="badge">—</span>';
+  const klass = d.failed > 0 ? 'fail' : d.warned > 0 ? 'warn' : 'passed';
+  return `<span class="badge ${klass}">${d.passed}通过 ${d.warned}警告 ${d.failed}失败</span>`;
+}
+
+function renderProjects() {
+  const tbody = document.getElementById('projects-tbody');
+  const s = state.filter.search.toLowerCase();
+  const tFilter = state.filter.type;
+  const stFilter = state.filter.status;
+  const filtered = state.projects.filter(p => {
+    const info = p.info;
+    if (tFilter && info.type !== tFilter) return false;
+    if (stFilter && info.status !== stFilter) return false;
+    if (s) {
+      const hay = (p.name + ' ' + info.path + ' ' + (info.tags || []).join(' ') + ' ' + (info.bundles || []).join(' ')).toLowerCase();
+      if (!hay.includes(s)) return false;
+    }
+    return true;
+  });
+  filtered.sort((a, b) => a.name.localeCompare(b.name));
+  if (filtered.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" class="empty">${escapeHtml(t('noMatch'))}</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = filtered.map(p => {
+    const info = p.info;
+    const tags = (info.tags || []).map(x => `<span class="pill">${escapeHtml(x)}</span>`).join('');
+    const bundles = (info.bundles || []).map(x => `<span class="pill">${escapeHtml(x)}</span>`).join('') || '<span class="badge">—</span>';
+    return `<tr>
+      <td><span class="status-dot ${statusDotClass(info.status)}"></span></td>
+      <td><strong>${escapeHtml(p.name)}</strong></td>
+      <td><span class="badge">${escapeHtml(info.type)}</span></td>
+      <td>${doctorBadge(p.doctor)}</td>
+      <td>${bundles}</td>
+      <td><code>${escapeHtml(info.path)}</code></td>
+    </tr>`;
+  }).join('');
+}
+
+function renderSummary() {
+  const totalProjects = state.projects.length;
+  const totalSkills = state.skills.length;
+  let totalPassed = 0, totalWarned = 0, totalFailed = 0;
+  for (const p of state.projects) {
+    if (p.doctor) {
+      totalPassed += p.doctor.passed;
+      totalWarned += p.doctor.warned;
+      totalFailed += p.doctor.failed;
+    }
+  }
+  document.getElementById('stat-projects').textContent = totalProjects;
+  document.getElementById('stat-skills').textContent = totalSkills;
+  document.getElementById('stat-passed').textContent = totalPassed;
+  document.getElementById('stat-failed').textContent = totalFailed;
+  const hubInfo = document.getElementById('hub-info');
+  hubInfo.textContent = `projects=${totalProjects} | skills=${totalSkills} | passed=${totalPassed} | failed=${totalFailed}`;
+}
+
+function populateFilters() {
+  const types = new Set();
+  const statuses = new Set();
+  for (const p of state.projects) {
+    if (p.info.type) types.add(p.info.type);
+    if (p.info.status) statuses.add(p.info.status);
+  }
+  const typeFilter = document.getElementById('type-filter');
+  const statusFilter = document.getElementById('status-filter');
+  typeFilter.innerHTML = `<option value="">${escapeHtml(t('allTypes'))}</option>` +
+    [...types].sort().map(x => `<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join('');
+  statusFilter.innerHTML = `<option value="">${escapeHtml(t('allStatuses'))}</option>` +
+    [...statuses].sort().map(x => `<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join('');
+}
+
+async function loadAll() {
+  try {
+    const [projRes, skillRes] = await Promise.all([
+      fetch('/agenthub-api/projects'),
+      fetch('/agenthub-api/skills'),
+    ]);
+    if (!projRes.ok) throw new Error(`projects: HTTP ${projRes.status}`);
+    if (!skillRes.ok) throw new Error(`skills: HTTP ${skillRes.status}`);
+    const projData = await projRes.json();
+    const skillData = await skillRes.json();
+    state.projects = projData.projects || [];
+    state.skills = skillData.skills || [];
+    renderSummary();
+    populateFilters();
+    renderProjects();
+  } catch (err) {
+    showToast('加载失败: ' + err.message, 'error');
+    document.getElementById('projects-tbody').innerHTML =
+      `<tr><td colspan="6" class="empty">加载失败: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+document.getElementById('refresh-btn').addEventListener('click', loadAll);
+document.getElementById('search').addEventListener('input', e => {
+  state.filter.search = e.target.value;
+  renderProjects();
+});
+document.getElementById('type-filter').addEventListener('change', e => {
+  state.filter.type = e.target.value;
+  renderProjects();
+});
+document.getElementById('status-filter').addEventListener('change', e => {
+  state.filter.status = e.target.value;
+  renderProjects();
+});
+document.getElementById('lang-zh').addEventListener('click', () => setLang('zh'));
+document.getElementById('lang-en').addEventListener('click', () => setLang('en'));
+
+function setLang(lang) {
+  state.lang = lang;
+  document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+  document.getElementById('lang-zh').classList.toggle('active', lang === 'zh');
+  document.getElementById('lang-en').classList.toggle('active', lang === 'en');
+  document.title = t('pageTitle');
+  document.getElementById('hub-info').textContent = t('loading');
+  document.getElementById('search').placeholder = t('searchPlaceholder');
+  document.querySelectorAll('.card .label')[0].textContent = t('projectLabel');
+  document.querySelectorAll('.card .label')[1].textContent = t('skillLabel');
+  document.querySelectorAll('.card .label')[2].textContent = t('passedLabel');
+  document.querySelectorAll('.card .label')[3].textContent = t('failedLabel');
+  populateFilters();
+  renderProjects();
+}
+
+loadAll();
+// Refresh every 30s
+setInterval(loadAll, 30000);
+</script>
+</body>
+</html>

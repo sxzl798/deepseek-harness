@@ -25,10 +25,14 @@ import { registerWebRoutes } from './web.ts'
 import { SessionRecorder, type SessionRecord } from './sessions.ts'
 import { ProfilesService } from './profiles.ts'
 import { BundlesService } from './bundles.ts'
+import { registerWebUi } from './ui.ts'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 export const name = 'agenthub'
 
-export const version = '0.7.0'
+export const version = '0.8.0'
 
 /** We depend on `commands` and `webServer`; we provide the three services. */
 export const inject = ['commands', 'webServer'] as const
@@ -223,7 +227,7 @@ function makeDoctorHandlers(
  * Mounts the RegistryService + SkillsService on the cordis context, then
  * registers one `/agenthub` slash command that dispatches on subcommand.
  */
-export function apply(ctx: Context): void {
+export async function apply(ctx: Context): Promise<void> {
   const hubDir = RegistryService.defaultHubDir()
   // Service constructors auto-register under their declared ctx key.
   const registry = new RegistryService(ctx, { hubDir })
@@ -348,4 +352,17 @@ export function apply(ctx: Context): void {
 
   // v0.5.0: mount REST endpoints on the dsh web server.
   registerWebRoutes(ctx, registry, skills, doctor)
+
+  // v0.8.0: mount the dashboard HTML under /agenthub-ui.
+  // Resolve the absolute path to contrib/agenthub/ui relative to this
+  // module's own source file. The plugin is loaded via tsx on its
+  // .ts source, so import.meta.url points at the source file.
+  const here = fileURLToPath(import.meta.url)
+  // here is `.../contrib/agenthub/src/index.ts`; we need `.../contrib/agenthub/ui`.
+  const uiDir = join(here, '..', '..', 'ui')
+  if (!existsSync(uiDir)) {
+    // eslint-disable-next-line no-console
+    console.warn(`[agenthub] UI directory not found at ${uiDir}; dashboard will 500`)
+  }
+  await registerWebUi(ctx, uiDir)
 }
