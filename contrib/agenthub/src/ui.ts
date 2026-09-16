@@ -60,5 +60,18 @@ export async function registerWebUi(
         }
       },
     })
+
+    // Convenience redirect: /agenthub → /agenthub-ui/ so users who
+    // discover only the namespace name land on the dashboard without
+    // typing the full path. Avoids conflict with dsh's own / route.
+    yield ctx.webServer.register({
+      kind: 'exact',
+      path: '/agenthub',
+      handler: (_req: IncomingMessage, res: ServerResponse) => {
+        res.statusCode = 302
+        res.setHeader('location', '/agenthub-ui/')
+        res.end()
+      },
+    })
   }, 'agenthub web UI')
 }
