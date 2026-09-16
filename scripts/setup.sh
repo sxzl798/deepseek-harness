@@ -30,7 +30,7 @@ warn() { printf '  \033[33m⚠\033[0m %s\n' "$*"; }
 fail() { printf '  \033[31m✗\033[0m %s\n' "$*"; exit 1; }
 
 # 0. Preflight
-note "[1/5] Preflight"
+note "[1/6] Preflight"
 command -v node   >/dev/null 2>&1 || fail "node not found (need v22+)"
 command -v pnpm  >/dev/null 2>&1 || fail "pnpm not found (npm i -g pnpm)"
 command -v git   >/dev/null 2>&1 || fail "git not found"
@@ -39,7 +39,7 @@ NODE_MAJOR="$(node -v | sed -E 's/^v([0-9]+).*/\1/')"
 ok "node $(node -v), pnpm $(pnpm -v), git $(git --version | awk '{print $3}')"
 
 # 1. Hub directory
-note "[2/5] Hub directory"
+note "[2/6] Hub directory"
 if [ -d "$HUB" ]; then
   ok "exists: $HUB"
 else
@@ -48,7 +48,7 @@ else
 fi
 
 # 2. Clone fork
-note "[3/5] Cloning $AGENTHUB_REPO → $DSH_HARNESS"
+note "[3/6] Cloning $AGENTHUB_REPO → $DSH_HARNESS"
 if [ -d "$DSH_HARNESS/.git" ]; then
   ok "already cloned: $DSH_HARNESS"
 else
@@ -58,7 +58,7 @@ else
 fi
 
 # 3. Install
-note "[4/5] Installing dependencies"
+note "[4/6] Installing dependencies"
 cd "$DSH_HARNESS"
 DSH_LEFTHOOK_ALLOW_HOOKS_PATH_OVERRIDE=1 pnpm install --prefer-offline 2>&1 | tail -3
 ok "pnpm install"
@@ -71,7 +71,7 @@ warn "skipped pnpm run build: this fork only ships the plugin source under"
 warn "contrib/, which dsh loads at runtime via tsx."
 
 # 4. Wire the plugin into the dsh web profile via an overlay
-note "[5/5] Wiring plugin into dsh web profile"
+note "[5/6] Wiring plugin into dsh web profile"
 mkdir -p "$DSH_HOME/profiles/web"
 OVERLAY="$DSH_HOME/profiles/web/cordis.patch.yml"
 
@@ -107,6 +107,12 @@ else
 EOF
   ok "overlay written: $OVERLAY"
 fi
+
+note "[6/6] Patching every project's AGENTS.md"
+# Make inject discoverable for any agent that opens the project.
+# Idempotent: scripts/patch-projects.py detects the marker it added
+# previously and skips already-patched files.
+python3 "$DSH_HARNESS/contrib/agenthub/scripts/patch-projects.py"
 
 note "Done"
 cat <<NEXT
